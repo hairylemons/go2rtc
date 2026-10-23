@@ -1,0 +1,69 @@
+# Foveo fork releases: a tag like v1.9.14-foveo.1 builds the five binaries
+# Foveo ships to site connectors (served from the Foveo image under
+# /downloads/go2rtc/), publishes them with a SHA256SUMS file, and pushes a
+# small Docker image for the server-side media accessory (Kamal).
+#
+# Fork-only patches on top of upstream (both offered upstream):
+#   - rtsp source option `#range=` → PLAY carries Range + Require: onvif-replay
+#   - http source `#header=` values are percent-decoded ("Bearer%20token")
+name: Foveo release
+
+on:
+  push:
+    tags: ["v*-foveo.*"]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  binaries:
+    name: Build binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+
+      - name: Build
+        env: { CGO_ENABLED: "0" }
+        run: |
+          set -eu
+          mkdir -p dist
+          build() { GOOS=$1 GOARCH=$2 go build -ldflags "-s -w" -trimpath -o "dist/$3" . ; }
+          build linux   amd64 go2rtc_linux_amd64
+          build linux   arm64 go2rtc_linux_arm64
+          build darwin  amd64 go2rtc_darwin_amd64
+          build darwin  arm64 go2rtc_darwin_arm64
+          build windows amd64 go2rtc_windows_amd64.exe
+          (cd dist && sha256sum go2rtc_* > SHA256SUMS && cat SHA256SUMS)
+
+      - name: Release
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --title "go2rtc ${GITHUB_REF_NAME}" \
+            --notes "Foveo build of go2rtc with the Range/onvif-replay and http header patches. Binaries are stripped, CGO off. See SHA256SUMS."
+
+  image:
+    name: Media accessory image
+    runs-on: ubuntu-latest
+    needs: binaries
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - name: Build linux/amd64 binary for the image
+        env: { CGO_ENABLED: "0", GOOS: linux, GOARCH: amd64 }
+        run: go build -ldflags "-s -w" -trimpath -o go2rtc .
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.foveo
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/go2rtc:${{ github.ref_name }}

@@ -1,0 +1,10 @@
+# The Foveo server-side media accessory: the fork's go2rtc plus ffmpeg (for
+# H.265→H.264 transcodes and JPEG frame grabs). Config is mounted by Kamal;
+# the API is reached only over the docker network.
+FROM alpine:3.21
+RUN apk add --no-cache ffmpeg ca-certificates tzdata
+COPY go2rtc /usr/local/bin/go2rtc
+RUN chmod 755 /usr/local/bin/go2rtc
+WORKDIR /config
+ENTRYPOINT ["/usr/local/bin/go2rtc"]
+CMD ["-config", "/config/go2rtc.yaml"]
